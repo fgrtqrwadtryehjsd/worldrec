@@ -1,0 +1,43 @@
+# Data
+dataset/
+dataset.tar.gz
+*.tar.gz
+
+# Model weights
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+
+# Output
+outputs/
+checkpoints/
+runs/
+wandb/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
