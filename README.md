@@ -10,13 +10,19 @@ worldrec/
 ├── requirements.txt
 ├── .gitignore
 ├── info.md                    # 万擎平台使用指南
-├── dataset.tar.gz             # 压缩数据集
-├── dataset/                   # 解压后的数据集
+├── dataset.tar.gz             # 压缩数据集（需自行放置）
+├── dataset/                   # 解压后的数据集（gitignore）
 │   ├── 懂推荐1~4.jsonl        # 推荐能力训练数据 (~19k 条)
 │   ├── 懂物料part1~7.jsonl    # 物料理解训练数据 (~10k 条)
 │   └── 懂用户.jsonl           # 用户理解训练数据 (~3k 条)
 ├── configs/
 │   └── ds_stage2.json         # DeepSpeed ZeRO Stage 2 配置
+├── scripts/                   # 一键脚本
+│   ├── setup.sh               # 配置 conda 环境
+│   ├── download_model.sh      # 下载基础模型
+│   ├── prepare_data.sh        # 解压数据集
+│   ├── train_lora.sh          # 单卡 LoRA 训练
+│   └── train_lora_2gpu.sh     # 双卡 LoRA 训练
 ├── src/
 │   ├── data_utils.py          # 数据加载与预处理
 │   ├── train_sft.py           # SFT LoRA 训练脚本 (低显存)
@@ -25,29 +31,59 @@ worldrec/
 └── outputs/                   # 训练输出目录 (运行时生成)
 ```
 
+## 快速开始（两张 RTX 3080）
+
+```bash
+# 1. 克隆代码
+git clone <your-repo-url>
+cd worldrec
+
+# 2. 配置环境（约 5-15 min，含 flash-attn 编译）
+bash scripts/setup.sh
+
+# 3. 激活环境
+conda activate worldrec
+
+# 4. 下载基础模型（~1.7GB）
+bash scripts/download_model.sh ~/models/OneReason-0.8B-pretrain-competition
+
+# 5. 解压数据集（需将 dataset.tar.gz 放到项目根目录）
+bash scripts/prepare_data.sh
+
+# 6a. 双卡 LoRA 训练（推荐，两卡并行速度约 2x）
+bash scripts/train_lora_2gpu.sh ~/models/OneReason-0.8B-pretrain-competition
+
+# 6b. 单卡 LoRA 训练（备用）
+bash scripts/train_lora.sh ~/models/OneReason-0.8B-pretrain-competition
+```
+
 ## 环境配置
 
 ```bash
-# 创建 conda 环境
+# 一键配置（推荐）
+bash scripts/setup.sh
+
+# 或手动配置
 conda create -n worldrec python=3.11 -y
 conda activate worldrec
-
-# 安装 PyTorch (CUDA 12.1)
 pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
-
-# 安装依赖
 pip install -r requirements.txt
+pip install deepspeed
+pip install flash-attn --no-build-isolation  # 可选，3080 支持
 ```
 
 ## 模型下载
 
 ```bash
-# 方式一：huggingface_hub
-python -c "from huggingface_hub import snapshot_download; snapshot_download('OpenOneRec/OneReason-0.8B-pretrain-competition', local_dir='D:/models/OneReason-0.8B-pretrain-competition')"
+# 一键下载（推荐）
+bash scripts/download_model.sh ~/models/OneReason-0.8B-pretrain-competition
 
-# 方式二：git lfs
-git lfs install
-git clone https://huggingface.co/OpenOneRec/OneReason-0.8B-pretrain-competition D:/models/OneReason-0.8B-pretrain-competition
+# 或手动下载
+python -c "
+from huggingface_hub import snapshot_download
+snapshot_download('OpenOneRec/OneReason-0.8B-pretrain-competition',
+                  local_dir='~/models/OneReason-0.8B-pretrain-competition')
+"
 ```
 
 ## 数据集说明
@@ -74,6 +110,26 @@ git clone https://huggingface.co/OpenOneRec/OneReason-0.8B-pretrain-competition 
 ```
 
 ## 训练
+
+### 两张 RTX 3080（10GB × 2）推荐方案
+
+**双卡 LoRA（推荐，effective batch = 16，速度最快）**
+
+```bash
+bash scripts/train_lora_2gpu.sh \
+    ~/models/OneReason-0.8B-pretrain-competition \
+    dataset \
+    outputs/lora_2gpu_v1
+```
+
+**单卡 LoRA（备用，effective batch = 16）**
+
+```bash
+bash scripts/train_lora.sh \
+    ~/models/OneReason-0.8B-pretrain-competition \
+    dataset \
+    outputs/lora_v1
+```
 
 ### 方式一：LoRA 微调（低显存，8GB+）
 
@@ -165,11 +221,13 @@ python src/analyze_data.py
 
 ## 硬件要求
 
-| 配置 | LoRA 微调 | 全参微调 | 全参 + DeepSpeed (多卡) |
-|------|---------|---------|------------------------|
-| GPU 显存 | 6-8GB | 24GB+ | 16GB+/卡 |
-| 内存 | 16GB | 32GB | 32GB+ |
-| 磁盘 | 5GB | 10GB | 10GB |
+| 配置 | LoRA 单卡 | LoRA 双卡 (3080×2) | 全参微调 |
+|------|---------|-------------------|---------|
+| GPU 显存 | 8GB+ | 10GB × 2 ✅ | 24GB+ |
+| 内存 | 16GB | 16GB | 32GB |
+| 磁盘 | 5GB | 5GB | 10GB |
+
+> **RTX 3080 (10GB) × 2** 最推荐使用双卡 LoRA 方案（`train_lora_2gpu.sh`），显存充裕、速度快。
 
 ## 模型上传
 

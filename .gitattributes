@@ -1,0 +1,19 @@
+# shell 脚本强制 LF 换行（在 Linux 执行时不能是 CRLF）
+*.sh text eol=lf
+
+# 文本文件正常处理
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# 二进制文件
+*.safetensors binary
+*.bin binary
+*.pt binary
+*.pth binary
+*.gz binary
+*.tar binary
+*.zip binary

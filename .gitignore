@@ -1,43 +1,106 @@
-# Data
+# ===== Data =====
+# 本地下载的 baseline（16GB），不要进仓库
+baseline/
 dataset/
 dataset.tar.gz
 *.tar.gz
+*.zip
+*.7z
+*.parquet
 
-# Model weights
+# HuggingFace 缓存
+.huggingface/
+.cache/
+hf_cache/
+
+# ===== Model weights / checkpoints =====
 *.safetensors
 *.bin
 *.pt
+*.pth
 *.ckpt
+*.onnx
+*.gguf
+*.ggml
+*.h5
+*.tflite
 
-# Output
+# LoRA / 适配器
+adapter_*/
+lora_*/
+
+# ===== Training outputs =====
 outputs/
 checkpoints/
 runs/
 wandb/
+tensorboard/
+tb_logs/
+*.log
+logs/
 
-# Python
+# DeepSpeed / 训练中间产物
+deepspeed_logs/
+deepspeed_config/
+*.trace
+profile/
+
+# ===== Python =====
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+*.egg
 *.egg-info/
 dist/
 build/
 .eggs/
+*.whl
 
-# Virtual environments
+# 依赖与构建
+pip-wheel-metadata/
+.python-version
+pyproject.toml.lock
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# ===== Virtual environments =====
 .venv/
 venv/
 env/
+ENV/
+conda-env/
 
-# IDE
+# ===== IDE / Editor =====
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# OS
+*~
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Logs
-*.log
+# ===== Secrets & local config =====
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
+
+# ===== OS / Temp =====
+*.tmp
+*.bak
+*.swp
+nul
