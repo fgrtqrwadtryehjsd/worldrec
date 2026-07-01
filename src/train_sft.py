@@ -181,7 +181,7 @@ def prepare_dataset(args, tokenizer) -> Dataset:
         tokenize_fn,
         remove_columns=raw_dataset.column_names,
         desc="Tokenizing",
-        num_proc=4,
+        num_proc=1,
     )
 
     # 过滤掉过长的样本
@@ -222,11 +222,18 @@ def main():
     print(f"  Vocab size: {len(tokenizer)}")
 
     # 2. 加载模型
+    # DDP (torchrun) 下每个进程只绑定自己的 GPU；单卡时 fallback 到 auto
+    local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    if local_rank >= 0:
+        device_map = {"": local_rank}
+    else:
+        device_map = "auto"
+
     print("Loading model...")
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path,
         dtype=torch.bfloat16 if args.bf16 else torch.float16,
-        device_map="auto",
+        device_map=device_map,
         trust_remote_code=True,
         attn_implementation="sdpa",
     )
@@ -269,13 +276,13 @@ def main():
         bf16=args.bf16,
         gradient_checkpointing=args.use_gradient_checkpointing,
         gradient_checkpointing_kwargs={"use_reentrant": False},
-        report_to="tensorboard",
-        save_safetensors=True,
+        report_to="none",
         save_strategy="steps",
-        dataloader_num_workers=2,
+        dataloader_num_workers=0,
         remove_unused_columns=False,
         optim="adamw_torch",
         lr_scheduler_type="cosine",
+        ddp_backend="gloo",
     )
 
     # 6. 初始化 Trainer
