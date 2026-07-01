@@ -4,6 +4,11 @@ OneReason-0.8B 全参微调训练脚本
 适用于快手 LLM-Rec 挑战赛 2026，基于 OneReason-0.8B-pretrain-competition 模型。
 全参微调需要更大显存（建议 >=24GB），支持多卡训练。
 
+数据集分布（粗估 token 数）：
+  懂推荐 1-4 : 19204 条, avg~4800, p95~8000, max~10865  → 推荐 max_seq_length >= 8192
+  懂物料 1-7 : 10384 条, avg~150,  p95~200,  max~245    → 极短，注意配比
+  懂用户     :  2892 条, avg~7155, p95~11002, max~15441 → 最长，需上调采样权重
+
 特性：
   - 全参微调（更新所有参数）
   - 支持 8-bit AdamW 优化器 (bitsandbytes) 以节省显存
@@ -80,8 +85,8 @@ def parse_args():
     parser.add_argument(
         "--max_seq_length",
         type=int,
-        default=4096,
-        help="Max sequence length (懂用户 samples are long)",
+        default=8192,
+        help="Max sequence length (懂用户 p95~11002, 懂推荐 p95~8000, 懂物料 max~245)",
     )
     parser.add_argument(
         "--filter_long_samples",

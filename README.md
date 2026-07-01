@@ -88,23 +88,36 @@ snapshot_download('OpenOneRec/OneReason-0.8B-pretrain-competition',
 
 ## 数据集说明
 
-数据集包含三个维度，共约 32,000 条样本：
+数据集包含三个维度，共约 32,480 条样本（12 个 JSONL 文件，解压后 ~436 MB）：
 
-| 维度 | 文件 | 样本数 | Avg Tokens | 说明 |
-|------|------|--------|------------|------|
-| 懂推荐 | 懂推荐1~4.jsonl | ~19,200 | ~1,855 | 多域推荐（直播/电商/视频/广告） |
-| 懂物料 | 懂物料part1~7.jsonl | ~10,400 | ~161 | 物料理解（desc↔token 双向） |
-| 懂用户 | 懂用户.jsonl | ~2,900 | ~4,770 | 用户行为序列建模 |
+| 维度 | 文件 | 条数 | avg_tok(估) | p95_tok | max_tok | 说明 |
+|------|------|------|------------|---------|---------|------|
+| 懂推荐 | 懂推荐1~4.jsonl | 19,204 | ~4,800 | ~8,000 | ~10,865 | 多域推荐（直播/电商/视频/广告） |
+| 懂物料 | 懂物料part1~7.jsonl | 10,384 | ~150 | ~200 | ~245 | 物料理解（desc↔token 双向） |
+| 懂用户 | 懂用户.jsonl | 2,892 | ~7,155 | ~11,002 | ~15,441 | 用户行为序列建模 |
 
-> 懂物料包含 7 个子任务：商品/主播/广告/短视频的 token 生成（desc→token）和描述生成（token→desc）。
+> **长度说明**：懂用户最长（max~15k token），懂推荐次之（max~11k），懂物料极短（max~245）。
+> `max_seq_length=8192` 可覆盖懂推荐 p95，懂用户会有 ~5% 被截断；若要完整覆盖懂用户需 12288+（显存压力大）。
 
-每条数据格式：
+> **配比说明**：懂物料极短（avg~150）vs 懂用户极长（avg~7155），直接混合会导致懂用户在 step 数上占比不足。
+> 推荐 `--sample_weights '{"懂推荐":1.0,"懂物料":1.5,"懂用户":3.0}'` 上调懂用户权重。
+
+懂物料包含 7 个子任务：
+- **part1**: 商品描述 → 商品 token（`<|prod_begin|>`）
+- **part2**: 主播描述 → 主播 token（`<|living_begin|>`）
+- **part3**: 广告描述 → 广告 token（`<|ad_begin|>`）
+- **part4**: 短视频描述 → 视频 token（`<|video_begin|>`）
+- **part5**: 商品 token → 商品描述（逆向）
+- **part6**: 广告 token → 广告描述（逆向）
+- **part7**: 视频 token → 视频描述（逆向）
+
+每条数据格式（懂用户 system 为空）：
 ```json
 [
   {
-    "system": "系统提示词",
-    "prompt": "用户输入",
-    "response": "<think>推理过程</think>\n<itemic_token_sequence>"
+    "system": "你负责根据用户多域行为理解用户兴趣偏好，并输出该用户在各场景中的目标内容。",
+    "prompt": "以下是一个用户的多域历史行为信息：\n用户视频行为: 深度观看了 <|video_begin|>...",
+    "response": "<think>【兴趣归纳】...</think>\n推荐结果..."
   }
 ]
 ```
@@ -113,7 +126,7 @@ snapshot_download('OpenOneRec/OneReason-0.8B-pretrain-competition',
 
 ### 两张 RTX 3080（10GB × 2）推荐方案
 
-**双卡 LoRA（推荐，effective batch = 16，速度最快）**
+**双卡 LoRA（推荐，effective batch = 16，速度约 2x）**
 
 ```bash
 bash scripts/train_lora_2gpu.sh \
@@ -122,7 +135,7 @@ bash scripts/train_lora_2gpu.sh \
     outputs/lora_2gpu_v1
 ```
 
-**单卡 LoRA（备用，effective batch = 16）**
+**单卡 LoRA（备用）**
 
 ```bash
 bash scripts/train_lora.sh \
@@ -130,6 +143,9 @@ bash scripts/train_lora.sh \
     dataset \
     outputs/lora_v1
 ```
+
+> 两张 3080 默认使用 `max_seq_length=8192`，覆盖懂推荐 p95 (8000) 和懂用户 p95 (11002) 中的大多数。
+> 若显存允许可调至 `--max_seq_length 12288` 进一步减少懂用户截断比例。
 
 ### 方式一：LoRA 微调（低显存，8GB+）
 
@@ -209,15 +225,16 @@ python src/analyze_data.py
 |------|-----------|---------|------|
 | `--model_path` | - | - | 模型路径 |
 | `--data_dir` | `dataset` | `dataset` | 数据目录 |
+| `--max_seq_length` | **8192** | **8192** | 覆盖懂推荐 p95(8000)；懂用户 p95 为 11002 |
 | `--learning_rate` | 2e-4 | 1e-5 | 学习率 |
 | `--num_epochs` | 3 | 2 | 训练轮次 |
 | `--batch_size` | 1 | 2 | 批大小 |
 | `--gradient_accumulation_steps` | 16 | 8 | 梯度累积 |
-| `--max_seq_length` | 2048 | 4096 | 最大序列长度 |
 | `--lora_r` | 64 | - | LoRA 秩 |
 | `--optim` | - | adamw_torch | 优化器（全参支持 adamw_8bit） |
+| `--sample_weights` | - | - | 数据配比权重（JSON），推荐 `{"懂推荐":1.0,"懂物料":1.5,"懂用户":3.0}` |
+| `--filter_long_samples` | false | false | 硬过滤超长样本（默认截断） |
 | `--deepspeed` | - | - | DeepSpeed 配置文件路径 |
-| `--sample_weights` | - | - | 数据配比权重（JSON） |
 
 ## 硬件要求
 

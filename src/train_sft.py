@@ -2,11 +2,18 @@
 OneReason-0.8B SFT LoRA 训练脚本
 
 适用于快手 LLM-Rec 挑战赛 2026，基于 OneReason-0.8B-pretrain-competition 模型。
-支持 8GB 显存的 RTX 4060 Laptop GPU，使用 LoRA + gradient checkpointing。
+支持 RTX 3080 10GB（单卡/双卡），使用 LoRA + gradient checkpointing。
+
+数据集分布（粗估 token 数）：
+  懂推荐 1-4 : 19204 条, avg~4800, p95~8000, max~10865  → 推荐 max_seq_length >= 8192
+  懂物料 1-7 : 10384 条, avg~150,  p95~200,  max~245    → 极短，注意配比
+  懂用户     :  2892 条, avg~7155, p95~11002, max~15441 → 最长，需上调采样权重
 """
 
 import argparse
+import json
 import os
+import random
 import sys
 from pathlib import Path
 
@@ -68,6 +75,18 @@ def parse_args():
         default=None,
         help="Max samples per file (for debugging)",
     )
+    parser.add_argument(
+        "--sample_weights",
+        type=str,
+        default=None,
+        help='JSON string of category weights, e.g. \'{"懂推荐":1.0,"懂物料":1.5,"懂用户":3.0}\'',
+    )
+    parser.add_argument(
+        "--filter_long_samples",
+        action="store_true",
+        default=False,
+        help="Hard-filter samples longer than max_seq_length (default: truncate)",
+    )
 
     # LoRA 配置
     parser.add_argument("--lora_r", type=int, default=64, help="LoRA rank")
@@ -92,7 +111,7 @@ def parse_args():
     parser.add_argument("--learning_rate", type=float, default=2e-4, help="Learning rate")
     parser.add_argument("--warmup_ratio", type=float, default=0.03, help="Warmup ratio")
     parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay")
-    parser.add_argument("--max_seq_length", type=int, default=2048, help="Max sequence length")
+    parser.add_argument("--max_seq_length", type=int, default=8192, help="Max sequence length (懂用户 p95~11002, 懂推荐 p95~8000)")
     parser.add_argument(
         "--use_gradient_checkpointing",
         action="store_true",
@@ -105,6 +124,28 @@ def parse_args():
 
     args = parser.parse_args()
     return args
+
+
+def apply_sample_weights(dataset, weights_json: str):
+    """按类别对数据集进行加权重采样（与 train_full.py 保持一致）。"""
+    weights = json.loads(weights_json)
+    random.seed(42)
+
+    samples = list(dataset)
+    weights_list = []
+    for s in samples:
+        combined = s.get("system", "") + s.get("prompt", "") + s.get("response", "")
+        w = 1.0
+        for cat, cw in weights.items():
+            if cat in combined:
+                w = cw
+                break
+        weights_list.append(w)
+
+    total_weight = sum(weights_list)
+    probs = [w / total_weight for w in weights_list]
+    indices = random.choices(range(len(samples)), weights=probs, k=len(samples))
+    return Dataset.from_list([samples[i] for i in indices])
 
 
 def prepare_dataset(args, tokenizer) -> Dataset:
@@ -125,6 +166,12 @@ def prepare_dataset(args, tokenizer) -> Dataset:
 
     print(f"Raw dataset size: {len(raw_dataset)}")
 
+    # 应用数据配比加权
+    if args.sample_weights:
+        print(f"Applying sample weights: {args.sample_weights}")
+        raw_dataset = apply_sample_weights(raw_dataset, args.sample_weights)
+        print(f"Resampled dataset size: {len(raw_dataset)}")
+
     # 格式化
     def tokenize_fn(sample):
         return format_chat_sample(sample, tokenizer, args.max_seq_length)
@@ -138,6 +185,14 @@ def prepare_dataset(args, tokenizer) -> Dataset:
     )
 
     # 过滤掉过长的样本
+    if args.filter_long_samples:
+        before = len(processed)
+        processed = processed.filter(
+            lambda x: len(x["input_ids"]) <= args.max_seq_length,
+            desc="Filtering long samples",
+        )
+        print(f"  Filtered {before - len(processed)} samples > {args.max_seq_length} tokens")
+
     processed = processed.filter(
         lambda x: len(x["input_ids"]) > 10,
         desc="Filtering",
