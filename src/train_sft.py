@@ -17,6 +17,16 @@ import random
 import sys
 from pathlib import Path
 
+# Single-GPU: disable distributed init before importing torch/accelerate
+if "LOCAL_RANK" not in os.environ:
+    os.environ.setdefault("RANK", "0")
+    os.environ.setdefault("WORLD_SIZE", "1")
+    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+    os.environ.setdefault("MASTER_PORT", "29501")
+
+# Windows: force gloo backend (no NCCL available)
+os.environ.setdefault("TORCH_DISTRIBUTED_BACKEND", "gloo")
+
 import torch
 from datasets import Dataset
 from peft import (

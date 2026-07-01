@@ -10,7 +10,7 @@
 | 项目 | 值 |
 |------|-----|
 | **状态** | 训练中 |
-| **开始时间** | 2026-07-01 23:54 |
+| **开始时间** | 2026-07-02 01:35 |
 | **脚本** | `scripts/windows/run_train_2gpu.bat 01 2048` |
 | **模型** | `E:/zdm/models/OneReason-0.8B-pretrain-competition` (OneReason-0.8B) |
 | **数据** | `dataset/` (32480 条，12 个 JSONL) |
@@ -37,31 +37,30 @@
 
 ### 环境
 
-- torch 2.5.1+cu121, transformers 5.12.1, peft 0.19.1, accelerate 1.14.0
-- deepspeed 0.14.5, flash-attn 2.7.4.post1
+- torch 2.5.1+cu124, transformers 4.57.6, peft 0.19.1, accelerate 1.14.0
+- deepspeed 0.14.5, flash-attn 2.7.4.post1 (forward 可用，backward 有 bug 未启用)
 - CUDA Toolkit 12.1 (conda 安装在 worldrec 环境)
 - GPU: 2× NVIDIA GeForce RTX 3080 Ti (12 GB each)
 
 ### Windows 适配说明
 
 原 `scripts/train_lora_2gpu.sh` 为 Linux 设计，Windows 下需以下修改：
-1. `TCPStore` 调用加 `use_libuv=False`（PyTorch Windows 版无 libuv）
-2. DDP 后端改 `gloo`（无 NCCL）
+1. `TCPStore` 调用加 `use_libuv=False`（PyTorch Windows 版无 libuv，需 patch `static_tcp_rendezvous.py` 和 `rendezvous.py`）
+2. DDP 后端强制 `gloo`（Windows 无 NCCL）
 3. `dataloader_num_workers=0`（Windows 多进程 spawn 不稳定）
 4. `datasets.map(num_proc=1)`（同上）
-5. 删除 `save_safetensors` 参数（transformers 5.x 已移除）
-6. `device_map` 按 `LOCAL_RANK` 绑定单卡（DDP 下不能用 "auto"）
+5. `device_map` 按 `LOCAL_RANK` 绑定单卡（DDP 下不能用 "auto"）
+6. `report_to="none"`（禁用 tensorboard，避免目录操作导致崩溃）
+7. flash-attn 2.7.4 Windows wheel backward 产生 nan（不可用），改用 `sdpa`
+8. 单卡模式需设置 `RANK`/`WORLD_SIZE` 等环境变量避免 accelerate 初始化分布式报错
 
 ### 训练过程
 
 | Step | Loss | Grad Norm | LR | 备注 |
 |------|------|-----------|-----|------|
-| 10 | 2.768 | 3.739 | 9.836e-06 | |
-| 70 | 1.778 | 1.451 | 7.541e-05 | |
-| 120 | 1.571 | 1.162 | 1.301e-04 | |
-| 130 | 1.613 | 1.308 | 1.410e-04 | |
+| 10 | 2.768 | 3.743 | 9.836e-06 | |
 
-（训练进行中，step 132/6090，~6.4s/step，预计 ~10.5 小时完成）
+（训练进行中，step 11/6090，~6.5s/step，预计 ~11 小时完成）
 
 ### 评测结果
 
