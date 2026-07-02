@@ -35,6 +35,9 @@ $CONDA_RUN pip install deepspeed -q
 
 # -------- 5. flash-attn（3080 是 Ampere，支持 FA2，可选，加速显著） --------
 echo "[5/6] 安装 flash-attn (可选，编译较慢约 10min) ..."
+export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-13.0}"
+export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.6}"
+export MAX_JOBS="${MAX_JOBS:-$(nproc)}"
 $CONDA_RUN pip install flash-attn --no-build-isolation -q || \
     echo "  [WARN] flash-attn 安装失败，将 fallback 到 sdpa，不影响训练"
 

@@ -18,6 +18,7 @@ OneReason-0.8B 全参微调训练脚本
 """
 
 import argparse
+import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -37,6 +38,12 @@ from src.data_utils import (
     format_chat_sample,
     SFTDataCollator,
 )
+
+
+def resolve_attn_implementation(requested: str) -> str:
+    if requested != "auto":
+        return requested
+    return "flash_attention_2" if importlib.util.find_spec("flash_attn") else "sdpa"
 
 
 def parse_args():
@@ -132,8 +139,8 @@ def parse_args():
     parser.add_argument(
         "--attn_implementation",
         type=str,
-        default="sdpa",
-        choices=["sdpa", "flash_attention_2", "eager"],
+        default="auto",
+        choices=["auto", "sdpa", "flash_attention_2", "eager"],
     )
 
     # 保存与日志
@@ -274,9 +281,8 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path,
         dtype=torch.bfloat16 if args.bf16 else torch.float16,
-        device_map="auto",
         trust_remote_code=True,
-        attn_implementation=args.attn_implementation,
+        attn_implementation=resolve_attn_implementation(args.attn_implementation),
     )
 
     if args.use_gradient_checkpointing:
@@ -311,7 +317,6 @@ def main():
         gradient_checkpointing=args.use_gradient_checkpointing,
         gradient_checkpointing_kwargs={"use_reentrant": False},
         report_to="tensorboard",
-        save_safetensors=True,
         save_strategy="steps",
         dataloader_num_workers=4,
         remove_unused_columns=False,

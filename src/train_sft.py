@@ -11,6 +11,7 @@ OneReason-0.8B SFT LoRA 训练脚本
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import random
@@ -48,6 +49,12 @@ from src.data_utils import (
     format_chat_sample,
     SFTDataCollator,
 )
+
+
+def resolve_attn_implementation(requested: str) -> str:
+    if requested != "auto":
+        return requested
+    return "flash_attention_2" if importlib.util.find_spec("flash_attn") else "sdpa"
 
 
 def parse_args():
@@ -96,6 +103,24 @@ def parse_args():
         action="store_true",
         default=False,
         help="Hard-filter samples longer than max_seq_length (default: truncate)",
+    )
+    parser.add_argument(
+        "--train_file",
+        type=str,
+        default=None,
+        help="Single JSONL train file (overrides --data_dir). Each line is a dict with system/prompt/response.",
+    )
+    parser.add_argument(
+        "--eval_file",
+        type=str,
+        default=None,
+        help="Single JSONL eval file for held-out evaluation during training.",
+    )
+    parser.add_argument(
+        "--eval_steps",
+        type=int,
+        default=500,
+        help="Evaluate every N steps (only if --eval_file provided).",
     )
 
     # LoRA 配置
@@ -158,21 +183,42 @@ def apply_sample_weights(dataset, weights_json: str):
     return Dataset.from_list([samples[i] for i in indices])
 
 
+def load_single_jsonl(file_path: str) -> Dataset:
+    """从单个 JSONL 文件加载数据（每行一个 dict）。"""
+    from datasets import Dataset
+    samples = []
+    with open(file_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            d = json.loads(line)
+            if isinstance(d, list):
+                samples.extend(d)
+            elif isinstance(d, dict):
+                samples.append(d)
+    print(f"  Loaded {file_path}: {len(samples)} samples")
+    return Dataset.from_list(samples)
+
+
 def prepare_dataset(args, tokenizer) -> Dataset:
-    """加载并预处理数据集。"""
+    """加载并预处理训练数据集。"""
     print("=" * 60)
-    print("Loading dataset...")
+    print("Loading training dataset...")
 
-    # 如果数据在子目录 dataset/ 下
-    data_dir = args.data_dir
-    if not os.path.isdir(data_dir):
-        data_dir = os.path.join(os.getcwd(), data_dir)
-
-    raw_dataset = load_dataset_from_dir(
-        data_dir=data_dir,
-        categories=args.categories,
-        max_samples=args.max_samples,
-    )
+    # 优先使用 --train_file（单文件模式）
+    if args.train_file:
+        raw_dataset = load_single_jsonl(args.train_file)
+    else:
+        # 目录模式
+        data_dir = args.data_dir
+        if not os.path.isdir(data_dir):
+            data_dir = os.path.join(os.getcwd(), data_dir)
+        raw_dataset = load_dataset_from_dir(
+            data_dir=data_dir,
+            categories=args.categories,
+            max_samples=args.max_samples,
+        )
 
     print(f"Raw dataset size: {len(raw_dataset)}")
 
@@ -213,6 +259,42 @@ def prepare_dataset(args, tokenizer) -> Dataset:
     return processed
 
 
+def prepare_eval_dataset(args, tokenizer) -> Dataset:
+    """加载并预处理 eval 数据集（不应用 sample_weights）。"""
+    print("=" * 60)
+    print("Loading eval dataset...")
+    raw_dataset = load_single_jsonl(args.eval_file)
+    print(f"Raw eval size: {len(raw_dataset)}")
+
+    def tokenize_fn(sample):
+        return format_chat_sample(sample, tokenizer, args.max_seq_length)
+
+    print("Tokenizing eval dataset...")
+    processed = raw_dataset.map(
+        tokenize_fn,
+        remove_columns=raw_dataset.column_names,
+        desc="Tokenizing eval",
+        num_proc=1,
+    )
+
+    if args.filter_long_samples:
+        before = len(processed)
+        processed = processed.filter(
+            lambda x: len(x["input_ids"]) <= args.max_seq_length,
+            desc="Filtering long eval samples",
+        )
+        print(f"  Filtered {before - len(processed)} eval samples > {args.max_seq_length} tokens")
+
+    processed = processed.filter(
+        lambda x: len(x["input_ids"]) > 10,
+        desc="Filtering eval",
+    )
+
+    print(f"Processed eval size: {len(processed)}")
+    print("=" * 60)
+    return processed
+
+
 def main():
     args = parse_args()
     print("Training Configuration:")
@@ -245,7 +327,7 @@ def main():
         dtype=torch.bfloat16 if args.bf16 else torch.float16,
         device_map=device_map,
         trust_remote_code=True,
-        attn_implementation="sdpa",
+        attn_implementation=resolve_attn_implementation("auto"),
     )
 
     if args.use_gradient_checkpointing:
@@ -270,8 +352,13 @@ def main():
     train_dataset = prepare_dataset(args, tokenizer)
     data_collator = SFTDataCollator(tokenizer, max_seq_length=args.max_seq_length)
 
+    # 4.5 准备 eval 数据集（可选）
+    eval_dataset = None
+    if args.eval_file:
+        eval_dataset = prepare_eval_dataset(args, tokenizer)
+
     # 5. 训练参数
-    training_args = TrainingArguments(
+    training_args_kwargs = dict(
         output_dir=args.output_dir,
         num_train_epochs=args.num_epochs,
         per_device_train_batch_size=args.batch_size,
@@ -292,14 +379,20 @@ def main():
         remove_unused_columns=False,
         optim="adamw_torch",
         lr_scheduler_type="cosine",
-        ddp_backend="gloo",
     )
+    if eval_dataset is not None:
+        training_args_kwargs["eval_strategy"] = "steps"
+        training_args_kwargs["eval_steps"] = args.eval_steps
+        training_args_kwargs["per_device_eval_batch_size"] = args.batch_size
+
+    training_args = TrainingArguments(**training_args_kwargs)
 
     # 6. 初始化 Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         data_collator=data_collator,
         processing_class=tokenizer,
     )
