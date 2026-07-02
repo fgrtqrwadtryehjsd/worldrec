@@ -1,3 +1,7 @@
+# 数据重建/中间产物目录
+baseline_reconstructed/
+reconstruct_baseline.py
+
 # ===== Data =====
 # 本地下载的 baseline（16GB），不要进仓库
 baseline/
@@ -7,6 +11,7 @@ dataset.tar.gz
 *.zip
 *.7z
 *.parquet
+
 
 # HuggingFace 缓存
 .huggingface/
