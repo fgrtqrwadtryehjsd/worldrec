@@ -99,11 +99,11 @@ for cat, fp in ext_files.items():
     raw_samples = load_jsonl(fp)
     converted = [convert_format(s) for s in raw_samples]
     
-    # 懂世界_ext 数据量太大（125万），这里依然抽样 30000 条，其他全量
+    # 懂世界_ext 数据量太大（15万+），为了让它恢复到baseline水平，我们增加抽样到 60000 条
     if cat == "懂世界_ext":
         valid = [s for s in converted if 50 < char_len(s) <= MAX_CHAR]
-        if len(valid) > 30000:
-            filtered = random.sample(valid, 30000)
+        if len(valid) > 60000:
+            filtered = random.sample(valid, 60000)
         else:
             filtered = valid
         base_cat = "懂世界"

@@ -19,8 +19,8 @@ echo "  Output: ${OUTPUT_DIR}"
 echo "  max_seq_length = 8192 (无硬过滤)"
 echo "============================================"
 
-# 继续保持这个采样配重比例
-SAMPLE_WEIGHTS='{"懂推荐": 2.0, "懂物料": 1.0, "懂用户": 5.0, "懂世界": 1.0}'
+# 继续保持这个采样配重比例，为了挽救懂世界指标，将懂世界的权重从 1.0 提升到 2.0
+SAMPLE_WEIGHTS='{"懂推荐": 2.0, "懂物料": 1.0, "懂用户": 5.0, "懂世界": 2.0}'
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
